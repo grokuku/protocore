@@ -3,6 +3,7 @@ import subprocess
 import requests
 import os
 import sys
+import time
 
 # Load configuration
 try:
@@ -23,14 +24,15 @@ You have the ability to run shell commands to interact with the system.
 RULES:
 1. Your responses MUST NOT contain any plain text, markdown formatting blocks (like ```json), or explanations outside the JSON.
 2. Your response MUST BE a single, valid JSON object.
-3. Before acting, analyze the last command output or file content.
+3. Before acting, analyze the COMMAND HISTORY and LAST COMMAND OUTPUT to know what has already been done.
 4. Keep your actions simple and atomic.
+5. If ALL goals are completed, you MUST set "action_type" to "finished".
 
 RESPONSE FORMAT:
 {
-    "thought": "A short reasoning explaining why you choose this action.",
-    "action_type": "The type of action: 'command' (to execute a shell command) or 'finished' (if the goal is achieved).",
-    "action_command": "The exact shell command to execute. Leave empty if action_type is 'finished'."
+  "thought": "A short reasoning explaining why you choose this action based on the goals and history.",
+  "action_type": "The type of action: 'command' (to execute a shell command) or 'finished' (if all goals are achieved).",
+  "action_command": "The exact shell command to execute. Leave empty if action_type is 'finished'."
 }
 """
 
@@ -58,14 +60,16 @@ def read_goals():
         return "Error: goals.md not found. Create one or ask the user."
 
 def run_bot():
-    print("Starting ProtoCore...")
+    print("Starting ProtoCore (Autonomous Mode)...")
     last_output = "System just started. No previous action."
+    command_history = []
     
     while True:
         goals = read_goals()
+        history_str = "\n".join(command_history) if command_history else "No commands executed yet."
         
-        # Construct the contextual prompt
-        context_prompt = f"CURRENT GOALS:\n{goals}\n\nLAST COMMAND OUTPUT:\n{last_output}\n\nWhat is your next action? Respond ONLY in JSON."
+        # Construct the contextual prompt with history
+        context_prompt = f"CURRENT GOALS:\n{goals}\n\nCOMMAND HISTORY:\n{history_str}\n\nLAST COMMAND OUTPUT:\n{last_output}\n\nWhat is your next action? Respond ONLY in JSON."
         
         print("\n[ProtoCore is thinking...]")
         llm_raw_response = get_llm_response(context_prompt)
@@ -90,11 +94,12 @@ def run_bot():
         elif action_type == "command":
             print(f">> COMMAND: {action_command}")
             
-            # Human-in-the-loop validation
-            user_input = input("\nExecute this command? (Press Enter to validate, 'n' to refuse/exit): ")
-            if user_input.lower() == 'n':
-                print("Execution aborted by user. Exiting ProtoCore.")
-                break
+            # Auto-execution (No HITL)
+            print(">> EXECUTING...")
+            time.sleep(2) # Short delay to let the user read the console
+            
+            # Record command in history
+            command_history.append(action_command)
             
             # Execute the command
             try:
@@ -103,10 +108,9 @@ def run_bot():
                     shell=True, 
                     capture_output=True, 
                     text=True,
-                    timeout=30 # Prevent hanging commands
+                    timeout=30
                 )
                 
-                # Combine stdout and stderr for the LLM to read
                 last_output = ""
                 if result.stdout:
                     last_output += f"STDOUT:\n{result.stdout}\n"
@@ -116,6 +120,8 @@ def run_bot():
                 if not last_output:
                     last_output = "Command executed successfully with no output."
                     
+            except subprocess.TimeoutExpired:
+                last_output = "Execution Error: Command timed out after 30 seconds. If starting a server, ensure you run it in the background using '&'."
             except Exception as e:
                 last_output = f"Execution Error: {str(e)}"
         else:
