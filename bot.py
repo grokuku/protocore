@@ -82,7 +82,7 @@ def parse_llm_response(raw_text):
         else:
             json_str = text_no_think.strip()
             
-    return json.loads(json_str)
+    return json.loads(json_str, strict=False)
 
 def read_goals():
     try:
