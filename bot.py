@@ -1,9 +1,9 @@
 import json
 import subprocess
 import requests
-import os
 import sys
 import time
+import re
 
 # Load configuration
 try:
@@ -16,25 +16,29 @@ except FileNotFoundError:
 OLLAMA_URL = config.get("ollama_url", "http://localhost:11434/api/generate")
 MODEL = config.get("model", "llama3")
 
+# Le prompt est mis à jour pour autoriser la réflexion avant le JSON
 SYSTEM_PROMPT = """
 You are ProtoCore, a fully autonomous agent running on a dedicated virtual machine. 
 Your goal is to complete the tasks described in the goals.md file. 
 You have full system access to run shell commands, create files, and modify your environment.
 
 RULES:
-1. Your responses MUST NOT contain any plain text, markdown formatting blocks (like ```json), or explanations outside the JSON.
-2. Your response MUST BE a single, valid JSON object.
-3. Before acting, analyze the COMMAND HISTORY and LAST COMMAND OUTPUT to know what has already been done and avoid repeating failed commands.
-4. Keep your actions simple and atomic.
-5. If ALL goals are completed, or if you are waiting for new instructions, you MUST set "action_type" to "idle". 
-6. ONLY set "action_type" to "finished" if a goal explicitly asks you to permanently terminate yourself.
+1. Before acting, analyze the COMMAND HISTORY and LAST COMMAND OUTPUT.
+2. Keep your actions simple and atomic.
+3. If ALL goals are completed, or if you are waiting for new instructions, you MUST set "action_type" to "idle". 
+4. ONLY set "action_type" to "finished" if explicitly asked to permanently terminate yourself.
+5. Your final answer MUST be a single, valid JSON object. 
 
-RESPONSE FORMAT:
+IF YOU ARE A REASONING MODEL:
+You may output your internal reasoning inside <think>...</think> tags FIRST.
+Immediately after your <think> block, you MUST output the JSON wrapped in a markdown block like this:
+```json
 {
-  "thought": "A short reasoning explaining your next step based on the goals, history, and last output.",
-  "action_type": "The type of action: 'command' (execute a shell command), 'idle' (wait for new goals), or 'finished' (terminate process).",
-  "action_command": "The exact shell command to execute. Leave empty if action_type is 'idle' or 'finished'."
+    "thought": "A short summary of your reasoning.",
+    "action_type": "command",
+    "action_command": "ls -la"
 }
+```
 """
 
 def get_llm_response(prompt_text):
@@ -43,7 +47,7 @@ def get_llm_response(prompt_text):
         "prompt": prompt_text,
         "system": SYSTEM_PROMPT,
         "stream": False,
-        "format": "json"
+        # On RETIRE "format": "json" pour laisser le modèle générer ses balises <think>
     }
     
     try:
@@ -51,7 +55,34 @@ def get_llm_response(prompt_text):
         response.raise_for_status()
         return response.json().get("response", "{}")
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return f'{{"error": "{str(e)}"}}'
+
+def parse_llm_response(raw_text):
+    """Extrait le JSON de manière robuste, en ignorant les blocs <think>."""
+    # 1. Optionnel: Afficher la réflexion si elle existe (pour le monitoring humain)
+    think_match = re.search(r'<think>(.*?)</think>', raw_text, flags=re.DOTALL)
+    if think_match:
+        print("\n[ProtoCore is deep thinking...]")
+        # Dé-commenter la ligne suivante si tu veux voir toute la réflexion dans la console
+        # print(think_match.group(1).strip()) 
+
+    # 2. Nettoyer le texte en retirant le bloc <think> pour ne pas perturber le parsing
+    text_no_think = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL)
+    
+    # 3. Chercher le bloc markdown ```json
+    json_match = re.search(r'```(?:json)?\s*(.*?)\s*```', text_no_think, flags=re.DOTALL)
+    if json_match:
+        json_str = json_match.group(1).strip()
+    else:
+        # Fallback: Trouver le premier { et le dernier }
+        start = text_no_think.find('{')
+        end = text_no_think.rfind('}')
+        if start != -1 and end != -1:
+            json_str = text_no_think[start:end+1].strip()
+        else:
+            json_str = text_no_think.strip()
+            
+    return json.loads(json_str)
 
 def read_goals():
     try:
@@ -61,33 +92,32 @@ def read_goals():
         return "Error: goals.md not found. Create one or ask the user."
 
 def run_bot():
-    print("Starting ProtoCore (Autonomous Mode - Phase 3)...")
+    print(f"Starting ProtoCore (Autonomous Mode - Phase 3) using model: {MODEL}...")
     last_output = "System just started. No previous action."
     command_history =[]
     
     while True:
         goals = read_goals()
-        # Keep up to 50 commands in history to leverage the 16k context window
         history_str = "\n".join(command_history[-50:]) if command_history else "No commands executed yet."
         
-        # Construct the contextual prompt
-        context_prompt = f"CURRENT GOALS:\n{goals}\n\nCOMMAND HISTORY:\n{history_str}\n\nLAST COMMAND OUTPUT:\n{last_output}\n\nWhat is your next action? Respond ONLY in JSON."
+        context_prompt = f"CURRENT GOALS:\n{goals}\n\nCOMMAND HISTORY:\n{history_str}\n\nLAST COMMAND OUTPUT:\n{last_output}\n\nWhat is your next action? Respond according to the rules."
         
-        print("\n[ProtoCore is thinking...]")
+        print("\n[ProtoCore is inferring...]")
         llm_raw_response = get_llm_response(context_prompt)
         
         try:
-            response_data = json.loads(llm_raw_response)
+            # On utilise le nouveau parseur intelligent
+            response_data = parse_llm_response(llm_raw_response)
         except json.JSONDecodeError:
-            print(f"[ERROR] LLM did not return valid JSON. Raw output:\n{llm_raw_response}")
-            last_output = f"ERROR: Your previous response was not valid JSON. You MUST return ONLY valid JSON. Raw text received: {llm_raw_response}"
+            print(f"[ERROR] LLM did not return parseable JSON. Raw output:\n{llm_raw_response}")
+            last_output = f"ERROR: Could not extract valid JSON from your previous response. Ensure you use the proper formatting. Raw text received: {llm_raw_response}"
             continue
 
         thought = response_data.get("thought", "No thought provided.")
         action_type = response_data.get("action_type", "")
         action_command = response_data.get("action_command", "")
 
-        print(f"\n>> THOUGHT: {thought}")
+        print(f"\n>> THOUGHT SUMMARY: {thought}")
         print(f">> ACTION TYPE: {action_type}")
         
         if action_type == "finished":
@@ -124,18 +154,17 @@ def run_bot():
                 if not raw_output:
                     last_output = "Command executed successfully with no output."
                 else:
-                    # TRUNCATE OUTPUT to protect the 16k context window (limit to 4000 chars)
                     if len(raw_output) > 4000:
                         last_output = f"...[TRUNCATED]...\n{raw_output[-4000:]}"
                     else:
                         last_output = raw_output
                     
             except subprocess.TimeoutExpired:
-                last_output = "Execution Error: Command timed out after 30 seconds. If starting a server, ensure you run it in the background using '&' or 'nohup'."
+                last_output = "Execution Error: Command timed out after 30 seconds. Ensure servers are backgrounded with 'nohup cmd &'."
             except Exception as e:
                 last_output = f"Execution Error: {str(e)}"
         else:
-            last_output = f"ERROR: Unknown action_type '{action_type}'. Use 'command', 'idle', or 'finished'."
+            last_output = f"ERROR: Unknown action_type '{action_type}'."
 
 if __name__ == "__main__":
     run_bot()
