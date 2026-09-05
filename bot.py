@@ -13,49 +13,65 @@ except FileNotFoundError:
     print("Error: config.json not found.")
     sys.exit(1)
 
-OLLAMA_URL = config.get("ollama_url", "http://localhost:11434/api/generate")
-MODEL = config.get("model", "llama3")
+BASE_URL = config.get("base_url", "")
+API_KEY = config.get("api_key", "")
+MODEL = config.get("model", "")
 
-# Le prompt est mis à jour pour autoriser la réflexion avant le JSON
+# Le provider est EXTERNE : aucun defaut local. Refuser de demarrer sans config explicite.
+if not BASE_URL or not MODEL or "REPLACE" in BASE_URL + MODEL:
+    print("Error: config.json is not configured (see the _README key in the file).")
+    print("  base_url: any OpenAI-compatible endpoint (e.g. http://<host>:11434/v1 for Ollama)")
+    print("  model:    a model served by that endpoint (e.g. llama3.2:3b)")
+    print("  api_key:  empty for local providers, required for cloud ones")
+    sys.exit(1)
+
+ENDPOINT = BASE_URL.rstrip("/") + "/chat/completions"
+
+# System prompt du bot (en anglais : meilleure obedience des modeles, tous providers confondus)
 SYSTEM_PROMPT = """
-You are ProtoCore, a fully autonomous agent running on a dedicated virtual machine. 
-Your goal is to complete the tasks described in the goals.md file. 
-You have full system access to run shell commands, create files, and modify your environment.
+You are ProtoCore, an autonomous agent on an isolated Linux VM.
+Each turn you receive: CURRENT GOALS, COMMAND HISTORY (your last commands), LAST COMMAND OUTPUT.
+
+Respond with ONE JSON object only, wrapped in a ```json block:
+{"thought": "<one sentence>", "action_type": "command|idle|finished", "action_command": "<shell cmd, only for command>"}
+
+ACTION TYPES:
+- "command": run ONE atomic shell command; verify its output before the next step.
+- "idle": all goals done, or waiting for new instructions in goals.md. Prefer idle over inventing work.
+- "finished": ONLY if goals.md explicitly asks for shutdown. Never otherwise.
 
 RULES:
-1. Before acting, analyze the COMMAND HISTORY and LAST COMMAND OUTPUT.
-2. Keep your actions simple and atomic.
-3. If ALL goals are completed, or if you are waiting for new instructions, you MUST set "action_type" to "idle". 
-4. ONLY set "action_type" to "finished" if explicitly asked to permanently terminate yourself.
-5. Your final answer MUST be a single, valid JSON object. 
+1. goals.md may change between turns - always act on the CURRENT GOALS block.
+2. A failed command must not be repeated unchanged: diagnose, then change approach.
+3. Servers/long tasks MUST be backgrounded: nohup <cmd> >/tmp/x.log 2>&1 &  (commands time out after 30s).
+4. LAST COMMAND OUTPUT keeps only the last 4000 chars: use `cmd | tail -n 50` for long outputs.
+5. When an objective is completed, update goals.md by changing its checkbox from [ ] to [x]. Never mark [x] without having verified the "Done when" criterion in goals.md.
+6. If LAST COMMAND OUTPUT contains a JSON parsing ERROR, your next reply must be strictly valid JSON.
 
-IF YOU ARE A REASONING MODEL:
-You may output your internal reasoning inside <think>...</think> tags FIRST.
-Immediately after your <think> block, you MUST output the JSON wrapped in a markdown block like this:
-```json
-{
-    "thought": "A short summary of your reasoning.",
-    "action_type": "command",
-    "action_command": "ls -la"
-}
-```
+IF YOU ARE A REASONING MODEL: put your thinking inside <think>...</think> tags first, then the ```json block. No other text.
+
+Example (idle): {"thought": "Waiting for new goals", "action_type": "idle", "action_command": ""}
 """
 
 def get_llm_response(prompt_text):
+    headers = {"Content-Type": "application/json"}
+    if API_KEY:
+        headers["Authorization"] = f"Bearer {API_KEY}"
     payload = {
         "model": MODEL,
-        "prompt": prompt_text,
-        "system": SYSTEM_PROMPT,
-        "stream": False,
-        # On RETIRE "format": "json" pour laisser le modèle générer ses balises <think>
+        "temperature": 0.2,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt_text}
+        ]
     }
-    
     try:
-        response = requests.post(OLLAMA_URL, json=payload)
+        response = requests.post(ENDPOINT, json=payload, headers=headers)
         response.raise_for_status()
-        return response.json().get("response", "{}")
+        return response.json()["choices"][0]["message"]["content"]
     except Exception as e:
         return f'{{"error": "{str(e)}"}}'
+
 
 def parse_llm_response(raw_text):
     """Extrait le JSON de manière robuste, en ignorant les blocs <think>."""

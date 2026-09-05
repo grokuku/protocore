@@ -1,4 +1,6 @@
 {
-    "ollama_url": "http://localhost:11434/api/generate",
-    "model": "llama3"
+    "_README": "Configure base_url and model, then run ./start.sh (or start.bat). base_url = ANY OpenAI-compatible endpoint: Ollama http://<host>:11434/v1, LM Studio http://<host>:1234/v1, vLLM http://<host>:8000/v1, OpenRouter https://openrouter.ai/api/v1. model = a model served by that endpoint (e.g. llama3.2:3b, qwen2.5:7b). api_key = empty for local providers, required for cloud ones. The bot refuses to start while values still contain REPLACE_ME.",
+    "base_url": "REPLACE_ME",
+    "model": "REPLACE_ME",
+    "api_key": ""
 }

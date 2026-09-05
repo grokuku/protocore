@@ -1,0 +1,6 @@
+# Python
+__pycache__/
+*.pyc
+
+# Runtime artifacts (created by the bot)
+protocore.log
