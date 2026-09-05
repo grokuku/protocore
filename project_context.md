@@ -31,3 +31,4 @@ ProtoCore is a minimalist, autonomous agent experiment running on an isolated Vi
 ## Key Learnings
 - **Short-term memory**: Without an execution history, the agent enters an infinite loop of repeating the first successful task.
 - **Timeout management**: Background tasks (like `http.server`) require explicit shell backgrounding (`&`) or the Python script will hang.
+- **LLM timeout**: `requests.post` needs an explicit timeout or a slow/hung provider blocks the loop forever (fixed: timeout=(10, 300)).

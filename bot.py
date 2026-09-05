@@ -47,6 +47,7 @@ RULES:
 4. LAST COMMAND OUTPUT keeps only the last 4000 chars: use `cmd | tail -n 50` for long outputs.
 5. When an objective is completed, update goals.md by changing its checkbox from [ ] to [x]. Never mark [x] without having verified the "Done when" criterion in goals.md.
 6. If LAST COMMAND OUTPUT contains a JSON parsing ERROR, your next reply must be strictly valid JSON.
+7. Never include secrets (api_key, passwords) in shell commands or console output - read them from config.json programmatically when needed.
 
 IF YOU ARE A REASONING MODEL: put your thinking inside <think>...</think> tags first, then the ```json block. No other text.
 
@@ -66,7 +67,7 @@ def get_llm_response(prompt_text):
         ]
     }
     try:
-        response = requests.post(ENDPOINT, json=payload, headers=headers)
+        response = requests.post(ENDPOINT, json=payload, headers=headers, timeout=(10, 300))
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"]
     except Exception as e:
