@@ -23,6 +23,7 @@ ProtoCore is a minimalist, autonomous agent experiment running on an isolated Vi
 - `bot.py`: The main cognitive loop (Now with auto-execution and timeout handling).
 - `config.json`: LLM configuration (base_url OpenAI-compatible, model, api_key). Shipped with placeholders + _README — must be configured before first run (validated at startup).
 - `start.sh` / `start.bat`: Dependency check (python3, requests) + provider reachability warning + launch.
+- `install.sh`: one-line remote installer (curl ... | bash) — downloads the tarball from GitHub (no git needed), prompts for base_url/model/api_key (or PROTOCORE_URL/MODEL/KEY env vars for CI), writes config.json and offers to start immediately (Enter = yes; never auto-starts in non-interactive mode). Dependency install stays in start.sh.
 - `goals.md`: The dynamic list of objectives (Target of self-modification).
 - `protocore.log`: (Created by the bot) Action logs.
 - `index.html`: (Created by the bot) Web dashboard.
