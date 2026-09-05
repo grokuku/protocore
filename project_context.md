@@ -17,6 +17,7 @@ ProtoCore is a minimalist, autonomous agent experiment running on an isolated Vi
     - The "Human-in-the-Loop" (HITL) safety measure has been REMOVED. 
     - The bot now executes commands automatically after a 2-second delay.
     - Objective: Self-modification of `goals.md` and setting up a dashboard.
+- **Scope extension**: the dashboard becomes an authenticated management interface — full-screen layout, login (first-run account creation), config page (password + LLM settings), and a chat agent with full shell access, auto-started at VM boot.
 
 ## Files
 - `bot.py`: The main cognitive loop (Now with auto-execution and timeout handling).
